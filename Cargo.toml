@@ -1,0 +1,13 @@
+[package]
+name = "bns-doh-and-resolver"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = { version = "0.11.24", features = [ "json" ] }
+rocket = "0.5.1"
+serde = "1.0"
+serde_json = { version = "1.0", features = [ "raw_value" ] }
+
