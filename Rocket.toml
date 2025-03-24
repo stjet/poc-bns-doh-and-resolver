@@ -1,0 +1,6 @@
+[global]
+port = 443
+
+[global.tls]
+certs = "127.0.0.1+3.pem"
+key = "127.0.0.1+3-key.pem"

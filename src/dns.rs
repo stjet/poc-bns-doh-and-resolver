@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::boxed::Box;
-use std::pin::Pin;
 
 use rocket::Response;
 use rocket::response;
@@ -18,7 +16,9 @@ use crate::utils::*;
 
 //https://dns.elintra.net/dns-query
 
-pub const SELF_CNAME: &'static str = "dns.elintra.net";
+//pub const SELF_CNAME: &'static str = "dns.elintra.net";
+pub const SELF_HOST: &'static str = "127.0.0.1";
+pub const SELF_IP: [u8; 4] = [127, 0, 0, 1];
 /*
  * - https://query.hdns.io/dns-query
  * - https://dns.mullvad.net/dns-query 
@@ -88,8 +88,8 @@ pub struct BnsDomain {
 }
 
 pub enum QueryResult {
-  Cname(String, Option<String>),
-  A([u8; 4]),
+  Cname(String),
+  A([u8; 4], Option<String>),
   NXDomain,
   NonBns,
 }
@@ -173,17 +173,17 @@ pub async fn do_dns_query_for_bns(domain_name: String, tld: String) -> QueryResu
     */
     if let Some(a_record) = result.metadata.get("A") {
       if let Some(a) = parse_a_record(a_record) {
-        return QueryResult::A(a);
+        return QueryResult::A(a, None);
       }
     }
     if let Some(cname_record) = result.metadata.get("CNAME") {
-      return QueryResult::Cname(cname_record.to_string(), None);
+      return QueryResult::Cname(cname_record.to_string());
     }
     if let Some(redirect) = result.metadata.get("redirect") {
-      return QueryResult::Cname(SELF_CNAME.to_string(), Some(redirect.to_string()));
+      return QueryResult::A(SELF_IP, Some(redirect.to_string()));
     }
     if let Some(resolved_address) = result.api_domain.resolved_address {
-      return QueryResult::Cname(SELF_CNAME.to_string(), Some(format!("https://creeper.banano.cc/account/{}", resolved_address)));
+      return QueryResult::A(SELF_IP, Some(format!("https://creeper.banano.cc/account/{}", resolved_address)));
     }
     QueryResult::NXDomain
   } else {
@@ -192,11 +192,10 @@ pub async fn do_dns_query_for_bns(domain_name: String, tld: String) -> QueryResu
 }
 
 async fn do_internal_dns_query(host: &str) -> QueryResult {
-  let tld = extract_tld(&host);
+  let (domain_name, tld) = extract_tld(&host);
   if TLDS.contains(&tld) {
     //todo: be better
-    let domain_name = host[..(host.len() - tld.len()).checked_sub(1).unwrap_or(0)].to_string();
-    do_dns_query_for_bns(domain_name, tld.to_string()).await
+    do_dns_query_for_bns(domain_name.to_string(), tld.to_string()).await
   } else {
     QueryResult::NonBns
   }
@@ -270,7 +269,7 @@ pub async fn answer_dns_query(dns_query: Vec<u8>, nested: usize) -> Answer {
     println!("q {} {:?}", query_host, dns_query);
     //now actual dns query stuff, and http response
     match do_internal_dns_query(&query_host).await {
-      QueryResult::Cname(cname, _) => {
+      QueryResult::Cname(cname) => {
         //cname
         //firefox, at least, never asks directly for cname, so we return as additional record?
         let mut host_label_bytes = query_hostname_to_label_bytes(&query_host);
@@ -296,23 +295,24 @@ pub async fn answer_dns_query(dns_query: Vec<u8>, nested: usize) -> Answer {
         resp_start_bytes.push(label_bytes.len().try_into().unwrap());
         //RDDATA
         resp_start_bytes.extend_from_slice(&label_bytes);
+        //recursively resolve CNAME, no longer needed since we tell the client we don't recurse
         /*if qtype == 5 {
           //question is 1, answer is 0
           let mut question: Vec<u8> = vec![0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0];
           question.extend(query_hostname_to_label_bytes(&cname));
           question.extend([0, 1, 0, 1]); //A (1) and IN (1)
           if let Some(nested_rb) = &Box::pin(answer_dns_query(dns_query, nested + 1)).await.bytes {
-            /*let ans = resp_start_bytes[7];
+            let ans = resp_start_bytes[7];
             resp_start_bytes[7] += ans;
             let mut ni = nested_rb.iter();
             for _ in 0..ans {
               //
-            }*/
+            }
           }
         }*/
         Answer { bytes: Some(resp_start_bytes) }
       },
-      QueryResult::A(ip) => {
+      QueryResult::A(ip, _) => {
         //TODO: make sure question type is all records (255) or A (1) (unrelated, CNAME is 5),
         //extract_type_bytes_from_dns_query?
         //

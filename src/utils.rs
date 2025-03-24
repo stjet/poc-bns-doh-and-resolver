@@ -69,8 +69,16 @@ pub fn ip_string_to_u8_array(ip: &str) -> [u8; 4] {
   ip_array
 }
 
-pub fn extract_tld(host: &str) -> &str {
-  host.split(".").last().unwrap()
+pub fn extract_tld(host: &str) -> (&str, &str) {
+  let n = host.split(".").count();
+  let mut tld = host.split(".").last().unwrap();
+  let mut domain = &host[..(host.len() - tld.len()).checked_sub(1).unwrap_or(0)];
+  //because https certs for *.ban won't work but will work for *.ban.k
+  if tld == "k" {
+    tld = host.split(".").nth(n - 2).unwrap_or("k");
+    domain = &domain[..(domain.len() - tld.len()).checked_sub(1).unwrap_or(0)];
+  }
+  (domain, tld)
 }
 
 //very forgiving, for now

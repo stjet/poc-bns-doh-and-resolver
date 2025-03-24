@@ -6,12 +6,13 @@ use rocket::response::Redirect;
 use rocket::response::content::RawHtml;
 use rocket::http::{ ContentType, Header };
 use rocket::request::{ FromRequest, Outcome };
+use rocket::shield::{ Shield, Hsts };
 use rocket::routes;
 
 mod utils;
 use crate::utils::extract_tld;
 mod dns;
-use crate::dns::{ answer_dns_query, do_dns_query_for_bns, Answer, QueryResult, SELF_CNAME };
+use crate::dns::{ answer_dns_query, do_dns_query_for_bns, Answer, QueryResult, SELF_HOST };
 
 struct Host {
   pub host: String,
@@ -22,12 +23,12 @@ impl<'r> FromRequest<'r> for Host {
   type Error = Infallible;
 
   async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-    match request.headers().get_one("Host") {
+    match request.host() {
       Some(host) => {
         Outcome::Success(Host { host: host.to_string() })
       },
       //whatever, man
-      None => Outcome::Success(Host { host: SELF_CNAME.to_string() })
+      None => Outcome::Success(Host { host: SELF_HOST.to_string() })
     }
   }
 }
@@ -38,10 +39,10 @@ enum MaybeRedirect<R> {
   Redirect(Redirect),
 }
 
-#[get("/<path..>")]
-async fn handle_redirect(path: PathBuf, host: Host) -> MaybeRedirect<&'static str> {
+async fn handle_redirect(path: Option<PathBuf>, host: Host) -> MaybeRedirect<&'static str> {
   let host = host.host;
-  if host == SELF_CNAME {
+  println!("HOST {}", host);
+  if host == SELF_HOST {
     MaybeRedirect::RawHtml(RawHtml(r#"<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -50,21 +51,31 @@ async fn handle_redirect(path: PathBuf, host: Host) -> MaybeRedirect<&'static st
     <meta name="viewport" content="width=device-width,initial-scale=1" />
   </head>
   <body>
-    <h1>Hello, world!</h1>
+    <h1>Hello, world! This is the BNS DoH POC.</h1>
+    <p>Set the DoH URL in your browser's settings to <code>https://127.0.0.1/dns-query</code>. Then try going to <a href="http://prussia.ban">http://prussia.ban</a> and <a href="https://prussia.ban.k">https://prussia.ban.k</a></p>
   </body>
 </html>"#))
   } else {
-    let tld = extract_tld(&host);
+    let (domain_name, tld) = extract_tld(&host);
     //todo: instead of unwrap_or(0) should reject the request or something
-    let domain_name = host[..(host.len() - tld.len()).checked_sub(1).unwrap_or(0)].to_string();
-    MaybeRedirect::Redirect(if let QueryResult::Cname(_, Some(redirect)) = do_dns_query_for_bns(domain_name, tld.to_string()).await {
+    MaybeRedirect::Redirect(if let QueryResult::A(_, Some(redirect)) = do_dns_query_for_bns(domain_name.to_string(), tld.to_string()).await {
       //todo: add path
       Redirect::to(redirect)
     } else {
       //failed
-      Redirect::to(format!("http://{}", SELF_CNAME))
+      Redirect::to(format!("http://{}", SELF_HOST))
     })
   }
+}
+
+#[get("/")]
+async fn handle_redirect_1(host: Host) -> MaybeRedirect<&'static str> {
+  handle_redirect(None, host).await
+}
+
+#[get("/<path..>")]
+async fn handle_redirect_2(path: PathBuf, host: Host) -> MaybeRedirect<&'static str> {
+  handle_redirect(Some(path), host).await
 }
 
 #[derive(Responder)]
@@ -99,8 +110,11 @@ async fn handle_dns_post(dns: Vec<u8>) -> Answer {
 
 #[rocket::launch]
 async fn rocket() -> _ {
-  rocket::build().mount("/", routes![
-    handle_redirect,
+  //let shield = Shield::default().disable::<Hsts>();
+  let shield = Shield::new();
+  rocket::build().attach(shield).mount("/", routes![
+    handle_redirect_1,
+    handle_redirect_2,
     handle_dns_options,
     handle_dns_get,
     handle_dns_post,
