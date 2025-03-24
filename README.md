@@ -9,6 +9,8 @@ mkcert -install
 mkcert 127.0.0.1 "*.ban.k" "*.jtv.k" "*.mictest.k"
 ```
 
+Running your own IPFS gateway is recommended (`ipfs init` then `ipfs daemon`), but not required. If not running locally, `src/dns.rs` needs to be edited to change the IPFS gateway.
+
 Then run:
 
 ```

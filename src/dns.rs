@@ -25,7 +25,8 @@ pub const SELF_IP: [u8; 4] = [127, 0, 0, 1];
 */
 const NON_BNS_DOH: &'static str = "https://mozilla.cloudflare-dns.com/dns-query";
 const BNS_API: &'static str = "https://api.creeper.banano.cc/banano/v1/account/bns";
-const IPFS_API: &'static str = "https://ipfs.oversas.org/ipfs/";
+//const IPFS_API: &'static str = "https://ipfs.oversas.org/ipfs/";
+const IPFS_API: &'static str = "http://localhost:8080/ipfs/";
 const TLDS: [&'static str; 3] = ["mictest", "ban", "jtv"];
 
 //rfc 1035 (section 4, section 7.3)
@@ -66,7 +67,7 @@ struct BnsApiPayload {
   tld: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct BnsApiDomain {
   tld: String,
   name: String,
@@ -154,8 +155,13 @@ async fn bns_domain_api(domain_name: String, tld: String) -> reqwest::Result<Bns
     tld,
   }).send().await?.json::<BnsApiResponse>().await?).domain;
   let mut metadata = HashMap::new();
+  //println!("{:?}", api_domain);
   if let Some(ref metadata_hash) = api_domain.metadata_hash {
+    //the hex_to_base58 function is an atrocity
+    let metadata_hash = hex_to_base58("0".repeat(128 - 4 - 64).to_string() + "1220" + metadata_hash);
+    println!("{}", metadata_hash);
     metadata = client.get(&format!("{}{}", IPFS_API, metadata_hash)).send().await?.json::<HashMap<String, String>>().await?;
+    println!("{:?}", metadata);
   }
   Ok(BnsDomain {
     api_domain,

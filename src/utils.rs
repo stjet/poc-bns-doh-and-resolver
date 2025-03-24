@@ -1,3 +1,5 @@
+use crypto_bigint::{ U512, Checked, NonZero };
+
 pub fn to_binary(num: impl std::fmt::Binary, pad: bool) -> String {
   let mut unpadded = format!("{:b}", num);
   if unpadded.len() < 6 && pad {
@@ -99,4 +101,22 @@ pub fn parse_a_record(a_record: &str) -> Option<[u8; 4]> {
   } else {
     None
   }
+}
+
+const BASE58_CHARS: &'static str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+//this is so so horrible and terrible but i cannot be arsed otherwise right now
+//dumb
+pub fn hex_to_base58(hex: String) -> String {
+  let mut num = Checked::new(U512::from_be_hex(&hex));
+  let mut base58 = String::new();
+  loop {
+    let index = num.0.unwrap().rem_vartime(&NonZero::new(U512::from(58u8)).unwrap()).to_be_bytes()[63] as usize;
+    base58 += &BASE58_CHARS.chars().nth(index).unwrap().to_string();
+    num = num / Checked::new(U512::from(58u8)); //automatically rounds down
+    if num.0.unwrap() == U512::ZERO {
+      break;
+    }
+  }
+  base58.chars().rev().collect::<String>()
 }
